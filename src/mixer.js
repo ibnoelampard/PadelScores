@@ -69,7 +69,7 @@ export function generateSchedule({ players, courts, durationHours, previousSched
       [teamA, teamB].forEach(team => partnerCounts.set(pairKey(...team), (partnerCounts.get(pairKey(...team)) || 0) + 1));
       teamA.forEach(a => teamB.forEach(b => opponentCounts.set(pairKey(a, b), (opponentCounts.get(pairKey(a, b)) || 0) + 1)));
       [...leftTeam, ...rightTeam].forEach(player => { playCounts[player.id] += 1; });
-      schedule.push({ id: `s${slotIndex + 1}-${courts[courtIndex].id}`, slotIndex, startMinute: slotIndex * 10, courtId: courts[courtIndex].id, teamA, teamB, scoreA: "", scoreB: "", finished: false, bye });
+      schedule.push({ id: `s${slotIndex + 1}-${courts[courtIndex].id}`, slotIndex, startMinute: slotIndex * 10, courtId: courts[courtIndex].id, teamA, teamB, scoreA: "", scoreB: "", started: slotIndex === 0, finished: false, bye });
     });
     bye.forEach(id => { byeCounts[id] += 1; }); previousByes = new Set(bye);
     const partnershipTotal = players.length * (players.length - 1) / 2;

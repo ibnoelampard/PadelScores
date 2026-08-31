@@ -1,12 +1,14 @@
 import { createI18n } from "./i18n.js";
 import { loadState, saveState, createEmptyState } from "./storage.js";
 import { generateSchedule } from "./mixer.js";
+import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
 const i18n = createI18n();
 let state = loadState();
 let activeCourtId = state.courts[0]?.id || "";
 let expandedScheduleId = null;
+let activeSessionTab = "schedule";
 
 const persist = () => saveState(state);
 const t = (key, variables) => i18n.t(key, variables);
@@ -53,7 +55,7 @@ function render() {
   if (state.session.status === "empty") renderEmpty();
   else if (state.session.status === "setup") renderSetup();
   else if (state.session.status === "players") renderPlayers();
-  else renderSchedule();
+  else renderSession();
 }
 
 function renderEmpty() {
@@ -165,8 +167,15 @@ function renderPlayers() {
   app.append(root);
 }
 
-function renderSchedule() {
-  const root = shell(t("schedule.title"), t("schedule.subtitle", { hours: state.session.durationHours }));
+function renderSession() {
+  const isLeaderboard = activeSessionTab === "leaderboard";
+  const root = shell(isLeaderboard ? t("leaderboard.title") : t("schedule.title"), isLeaderboard ? t("leaderboard.subtitle") : t("schedule.subtitle", { hours: state.session.durationHours }));
+  if (isLeaderboard) {
+    renderLeaderboard(root);
+    root.append(sessionTabs());
+    app.append(root);
+    return;
+  }
   const tabs = el("nav", { class: "court-tabs", "aria-label": t("schedule.chooseCourt") });
   state.courts.forEach(court => tabs.append(button(courtName(court), `court-tab ${court.id === activeCourtId ? "active" : ""}`, () => {
     activeCourtId = court.id;
@@ -194,7 +203,45 @@ function renderSchedule() {
     }
   }));
   root.append(actions);
+  root.append(sessionTabs());
   app.append(root);
+}
+
+function sessionTabs() {
+  const tabs = el("nav", { class: "session-tabs", "aria-label": t("session.chooseTab") });
+  [["schedule", "session.schedule"], ["leaderboard", "session.leaderboard"]].forEach(([tab, label]) => {
+    tabs.append(button(t(label), `session-tab ${activeSessionTab === tab ? "active" : ""}`, () => {
+      activeSessionTab = tab;
+      render();
+    }, { "aria-current": activeSessionTab === tab ? "page" : "false" }));
+  });
+  return tabs;
+}
+
+function renderLeaderboard(root) {
+  const standings = calculateLeaderboard(state.players, state.schedule);
+  const section = el("section", { class: "leaderboard" });
+  section.append(el("div", { class: "section-head" }, [
+    el("h2", { text: t("leaderboard.heading") }),
+    el("span", { class: "subtle", text: t("leaderboard.matchesFinished", { count: state.schedule.filter(item => item.finished).length }) })
+  ]));
+  const table = el("div", { class: "leaderboard-table", role: "table", "aria-label": t("leaderboard.heading") });
+  const header = el("div", { class: "leaderboard-row leaderboard-header", role: "row" });
+  ["leaderboard.player", "leaderboard.matches", "leaderboard.wins", "leaderboard.draws", "leaderboard.losses"].forEach(key => header.append(el("span", { role: "columnheader", text: t(key) })));
+  table.append(header);
+  standings.forEach((player, index) => {
+    const row = el("div", { class: "leaderboard-row", role: "row" });
+    row.append(
+      el("span", { class: "leaderboard-player", role: "cell", text: `${index + 1}. ${player.name}` }),
+      el("span", { role: "cell", text: String(player.matches) }),
+      el("span", { class: "stat-win", role: "cell", text: String(player.wins) }),
+      el("span", { class: "stat-draw", role: "cell", text: String(player.draws) }),
+      el("span", { class: "stat-loss", role: "cell", text: String(player.losses) })
+    );
+    table.append(row);
+  });
+  section.append(table);
+  root.append(section);
 }
 
 function scheduleCard(item, expanded, canStart) {

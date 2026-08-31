@@ -10,7 +10,7 @@ Memungkinkan satu lapangan meneruskan pertandingan tanpa menunggu lapangan lain 
 - Pertandingan berstatus **sedang bermain** dan **selesai** terkunci; susunan pemainnya tidak dapat diubah.
 - Admin memilih satu pemain yang keluar dari pertandingan target dan satu pemain pengganti secara manual.
 - Pemain pengganti hanya dapat dipilih bila tidak sedang bermain pada pertandingan aktif di lapangan mana pun dan belum berada di pertandingan target.
-- Setelah konfirmasi, pertandingan target memakai susunan baru. Semua pertandingan setelah target yang belum dimulai dibuat ulang.
+- Setelah konfirmasi, pertandingan target memakai susunan baru. Semua pertandingan lain yang belum dimulai pada slot target dan slot setelahnya dibuat ulang. Batas ini mencegah pemain pengganti tetap muncul pada lapangan lain di slot yang sama.
 - Pertandingan yang telah dimulai atau selesai tidak berubah, termasuk peserta, skor, dan hasilnya.
 - Klasemen tetap hanya memakai pertandingan yang selesai, dengan susunan peserta yang tercatat pada pertandingan tersebut.
 
@@ -46,7 +46,7 @@ State lama tanpa `replacements` dinormalisasi ke array kosong agar sesi yang tel
 1. Kumpulkan semua pertandingan yang mulai atau selesai sebagai fakta tetap, ditambah pertandingan target setelah penggantian.
 2. Hitung jumlah main, bye, pasangan, dan lawan dari pertandingan tetap tersebut.
 3. Tentukan pemain yang sedang bermain dari seluruh pertandingan `started && !finished` dan keluarkan mereka dari kandidat pertandingan baru.
-4. Buat ulang hanya pertandingan belum dimulai setelah target, menggunakan prioritas fairness yang sudah ada: jumlah main paling sedikit, prioritas bye, pengulangan pasangan, dan pengulangan lawan.
+4. Buat ulang pertandingan belum dimulai lain pada slot target dan semua slot setelahnya, menggunakan prioritas fairness yang sudah ada: jumlah main paling sedikit, prioritas bye, pengulangan pasangan, dan pengulangan lawan.
 5. Pastikan pemain hanya berada pada satu pertandingan di setiap slot baru dan tidak ditempatkan pada pertandingan ketika ia masih aktif di lapangan lain.
 
 Pemain yang digantikan tidak dihapus dari sesi. Ia kembali tersedia untuk dipertimbangkan pada remix berikutnya, selama tidak sedang bermain.

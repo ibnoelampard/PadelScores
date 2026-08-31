@@ -44,7 +44,7 @@ const messages = {
     "score.right": "Skor tim kanan",
     "match.edit": "Edit",
     "match.start": "Mulai",
-    "match.finish": "Selesaikan pertandingan"
+    "match.finish": "✓ Selesai"
   },
   en: {
     "language.switch": "Switch language to Indonesian",
@@ -89,7 +89,7 @@ const messages = {
     "score.right": "Right team score",
     "match.edit": "Edit",
     "match.start": "Start",
-    "match.finish": "Finish match"
+    "match.finish": "✓ Finish"
   }
 };
 

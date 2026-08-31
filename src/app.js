@@ -268,19 +268,21 @@ function scheduleCard(item, expanded, canStart) {
       persist();
       render();
     }));
-    else if (canStart) card.append(button(t("match.start"), "more-btn start-btn", () => {
-      item.started = true;
-      replacementMatchId = null;
-      expandedScheduleId = item.id;
-      persist();
-      render();
-    }));
-    if (!item.finished) {
-      card.append(button(t("match.replace"), "more-btn", () => {
+    else {
+      const actions = el("div", { class: "match-actions" });
+      if (canStart) actions.append(button(t("match.start"), "more-btn start-btn", () => {
+        item.started = true;
+        replacementMatchId = null;
+        expandedScheduleId = item.id;
+        persist();
+        render();
+      }));
+      actions.append(button(t("match.replace"), "more-btn", () => {
         replacementMatchId = replacementMatchId === item.id ? null : item.id;
         expandedScheduleId = item.id;
         render();
       }));
+      card.append(actions);
       if (replacementMatchId === item.id) card.append(replacementPanel(item));
     }
     return card;

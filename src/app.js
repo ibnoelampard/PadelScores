@@ -201,7 +201,7 @@ function scheduleCard(item, expanded, canStart) {
   const names = id => state.players.find(player => player.id === id)?.name || "-";
   const active = item.started && !item.finished;
   const card = el("article", { class: `schedule-item ${item.finished ? "done" : active ? "live" : ""} ${expanded && active ? "expanded" : "collapsed"}` });
-  const status = item.finished ? t("status.finished") : active ? t("status.playing") : "";
+  const status = active ? t("status.playing") : "";
   if (status) card.append(el("div", { class: "slot-head status-row" }, [el("span", { class: "live-text", text: status })]));
   const match = el("div", { class: "match" });
   match.append(el("div", { class: "team", text: `${names(item.teamA[0])}\n${names(item.teamA[1])}` }));

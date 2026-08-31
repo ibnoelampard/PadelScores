@@ -8,7 +8,7 @@ export function generateSchedule({ players, courts, durationHours, previousSched
   const opponentCounts = new Map();
   const schedule = [];
   let previousByes = new Set(previousSchedule.filter(item => item.bye).flatMap(item => item.bye));
-  const ranked = (list) => [...list].sort((a, b) => ((previousByes.has(b.id) ? -100 : 0) + playCounts[b.id] * 10 + byeCounts[b.id]) - ((previousByes.has(a.id) ? -100 : 0) + playCounts[a.id] * 10 + byeCounts[a.id]) || a.id.localeCompare(b.id));
+  const ranked = (list) => [...list].sort((a, b) => ((previousByes.has(a.id) ? -100 : 0) + playCounts[a.id] * 10 + byeCounts[a.id]) - ((previousByes.has(b.id) ? -100 : 0) + playCounts[b.id] * 10 + byeCounts[b.id]) || a.id.localeCompare(b.id));
   for (let slotIndex = 0; slotIndex < slots; slotIndex += 1) {
     const activeCount = Math.min(players.length, courts.length * 4);
     const active = ranked(players).slice(0, activeCount);

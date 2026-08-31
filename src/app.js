@@ -209,11 +209,13 @@ function renderSession() {
 
 function sessionTabs() {
   const tabs = el("nav", { class: "session-tabs", "aria-label": t("session.chooseTab") });
-  [["schedule", "session.schedule"], ["leaderboard", "session.leaderboard"]].forEach(([tab, label]) => {
-    tabs.append(button(t(label), `session-tab ${activeSessionTab === tab ? "active" : ""}`, () => {
+  [["schedule", "session.schedule", "🗓"], ["leaderboard", "session.leaderboard", "🏆"]].forEach(([tab, label, icon]) => {
+    const tabButton = button("", `session-tab ${activeSessionTab === tab ? "active" : ""}`, () => {
       activeSessionTab = tab;
       render();
-    }, { "aria-current": activeSessionTab === tab ? "page" : "false" }));
+    }, { "aria-current": activeSessionTab === tab ? "page" : "false" });
+    tabButton.append(el("span", { class: "session-tab-icon", "aria-hidden": "true", text: icon }), el("span", { text: t(label) }));
+    tabs.append(tabButton);
   });
   return tabs;
 }

@@ -1,6 +1,6 @@
 import { createI18n } from "./i18n.js";
 import { loadState, saveState, createEmptyState } from "./storage.js";
-import { generateSchedule } from "./mixer.js";
+import { availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
 import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
@@ -9,6 +9,8 @@ let state = loadState();
 let activeCourtId = state.courts[0]?.id || "";
 let expandedScheduleId = null;
 let activeSessionTab = "schedule";
+let replacementMatchId = null;
+let sessionNotice = "";
 
 const persist = () => saveState(state);
 const t = (key, variables) => i18n.t(key, variables);
@@ -180,9 +182,11 @@ function renderSession() {
   state.courts.forEach(court => tabs.append(button(courtName(court), `court-tab ${court.id === activeCourtId ? "active" : ""}`, () => {
     activeCourtId = court.id;
     expandedScheduleId = null;
+    replacementMatchId = null;
     render();
   })));
   root.append(tabs);
+  if (sessionNotice) root.append(el("div", { class: "success", role: "status", text: sessionNotice }));
   const list = el("section");
   const court = state.courts.find(item => item.id === activeCourtId) || state.courts[0];
   const items = state.schedule.filter(item => item.courtId === court.id);
@@ -266,10 +270,19 @@ function scheduleCard(item, expanded, canStart) {
     }));
     else if (canStart) card.append(button(t("match.start"), "more-btn start-btn", () => {
       item.started = true;
+      replacementMatchId = null;
       expandedScheduleId = item.id;
       persist();
       render();
     }));
+    if (!item.finished) {
+      card.append(button(t("match.replace"), "more-btn", () => {
+        replacementMatchId = replacementMatchId === item.id ? null : item.id;
+        expandedScheduleId = item.id;
+        render();
+      }));
+      if (replacementMatchId === item.id) card.append(replacementPanel(item));
+    }
     return card;
   }
   const scores = el("div", { class: "scores" });
@@ -289,6 +302,43 @@ function scheduleCard(item, expanded, canStart) {
     render();
   }));
   return card;
+}
+
+function replacementPanel(item) {
+  const participants = [...item.teamA, ...item.teamB];
+  const candidates = availableReplacementPlayers({ players: state.players, schedule: state.schedule, targetMatchId: item.id });
+  const panel = el("div", { class: "replacement-panel" });
+  panel.append(el("p", { class: "subtle", text: t("replace.notice") }));
+  if (!candidates.length) {
+    panel.append(el("div", { class: "error", role: "alert", text: t("replace.none") }), button(t("common.cancel"), "secondary-btn wide", () => { replacementMatchId = null; render(); }));
+    return panel;
+  }
+  const outSelect = el("select", { class: "input", "aria-label": t("replace.out") });
+  participants.forEach(id => outSelect.append(el("option", { value: id, text: state.players.find(player => player.id === id)?.name || "-" })));
+  const inSelect = el("select", { class: "input", "aria-label": t("replace.in") });
+  candidates.forEach(player => inSelect.append(el("option", { value: player.id, text: player.name })));
+  const error = el("div", { class: "error", role: "alert" });
+  error.hidden = true;
+  panel.append(
+    el("label", { text: t("replace.out") }), outSelect,
+    el("label", { text: t("replace.in") }), inSelect,
+    error,
+    el("div", { class: "replacement-actions" }, [
+      button(t("common.cancel"), "secondary-btn", () => { replacementMatchId = null; render(); }),
+      button(t("replace.save"), "primary-btn", () => {
+        try {
+          state.schedule = replaceAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, targetMatchId: item.id, outPlayerId: outSelect.value, inPlayerId: inSelect.value }).schedule;
+          replacementMatchId = null;
+          sessionNotice = t("replace.success");
+          persist();
+          render();
+        } catch {
+          showError(error, t("replace.error"));
+        }
+      })
+    ])
+  );
+  return panel;
 }
 
 render();

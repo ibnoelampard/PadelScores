@@ -56,7 +56,15 @@ const messages = {
     "score.right": "Skor tim kanan",
     "match.edit": "Edit",
     "match.start": "Mulai",
-    "match.finish": "✓ Selesai"
+    "match.finish": "✓ Selesai",
+    "match.replace": "Ganti pemain",
+    "replace.out": "Pemain yang diganti",
+    "replace.in": "Pemain pengganti",
+    "replace.notice": "Match setelahnya akan di-mix ulang. Match bermain dan selesai tidak berubah.",
+    "replace.save": "Simpan & Remix",
+    "replace.success": "Pemain diganti dan jadwal berikutnya sudah di-mix ulang.",
+    "replace.none": "Tidak ada pemain istirahat yang tersedia.",
+    "replace.error": "Penggantian tidak dapat dilakukan. Coba buka ulang jadwal."
   },
   en: {
     "language.switch": "Switch language to Indonesian",
@@ -113,7 +121,15 @@ const messages = {
     "score.right": "Right team score",
     "match.edit": "Edit",
     "match.start": "Start",
-    "match.finish": "✓ Finish"
+    "match.finish": "✓ Finish",
+    "match.replace": "Replace player",
+    "replace.out": "Player to replace",
+    "replace.in": "Replacement player",
+    "replace.notice": "Later matches will be remixed. Playing and completed matches stay unchanged.",
+    "replace.save": "Save & Remix",
+    "replace.success": "Player replaced and later matches remixed.",
+    "replace.none": "No resting player is available.",
+    "replace.error": "The replacement could not be made. Please reopen the schedule."
   }
 };
 

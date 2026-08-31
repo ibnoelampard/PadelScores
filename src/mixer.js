@@ -77,3 +77,72 @@ export function generateSchedule({ players, courts, durationHours, previousSched
   }
   return { schedule, byePlayerIds: [...previousByes] };
 }
+
+const idsIn = match => [...(match.teamA || []), ...(match.teamB || [])];
+
+export function availableReplacementPlayers({ players, schedule, targetMatchId }) {
+  const target = schedule.find(match => match.id === targetMatchId);
+  if (!target) return [];
+  const unavailable = new Set([...idsIn(target), ...schedule.filter(match => match.started && !match.finished).flatMap(idsIn)]);
+  return players.filter(player => !unavailable.has(player.id));
+}
+
+function addMatchHistory(match, playCounts, partnerCounts, opponentCounts) {
+  const left = match.teamA || [];
+  const right = match.teamB || [];
+  if (left.length !== 2 || right.length !== 2) return;
+  [...left, ...right].forEach(id => { playCounts[id] = (playCounts[id] || 0) + 1; });
+  [left, right].forEach(team => partnerCounts.set(pairKey(...team), (partnerCounts.get(pairKey(...team)) || 0) + 1));
+  left.forEach(a => right.forEach(b => opponentCounts.set(pairKey(a, b), (opponentCounts.get(pairKey(a, b)) || 0) + 1)));
+}
+
+export function replaceAndRemixSchedule({ players, courts, schedule, targetMatchId, outPlayerId, inPlayerId, changedAt = new Date().toISOString() }) {
+  const target = schedule.find(match => match.id === targetMatchId);
+  if (!target) throw new Error("MATCH_NOT_FOUND");
+  if (target.started || target.finished) throw new Error("MATCH_LOCKED");
+  if (!idsIn(target).includes(outPlayerId)) throw new Error("OUT_PLAYER_INVALID");
+  if (!availableReplacementPlayers({ players, schedule, targetMatchId }).some(player => player.id === inPlayerId)) throw new Error("IN_PLAYER_UNAVAILABLE");
+
+  const copied = schedule.map(match => ({ ...match, teamA: [...(match.teamA || [])], teamB: [...(match.teamB || [])], bye: [...(match.bye || [])], replacements: [...(match.replacements || [])] }));
+  const changed = copied.find(match => match.id === targetMatchId);
+  changed.teamA = changed.teamA.map(id => id === outPlayerId ? inPlayerId : id);
+  changed.teamB = changed.teamB.map(id => id === outPlayerId ? inPlayerId : id);
+  changed.replacements.push({ outPlayerId, inPlayerId, changedAt });
+
+  const activeIds = new Set(copied.filter(match => match.started && !match.finished).flatMap(idsIn));
+  const locked = copied.filter(match => match.id === targetMatchId || match.started || match.finished);
+  const playCounts = Object.fromEntries(players.map(player => [player.id, 0]));
+  const byeCounts = Object.fromEntries(players.map(player => [player.id, 0]));
+  const partnerCounts = new Map();
+  const opponentCounts = new Map();
+  locked.forEach(match => addMatchHistory(match, playCounts, partnerCounts, opponentCounts));
+  const remixed = copied.filter(match => match.id !== targetMatchId && !match.started && !match.finished && match.slotIndex >= target.slotIndex);
+  const preserved = copied.filter(match => !remixed.includes(match));
+  const bySlot = new Map();
+  remixed.forEach(match => bySlot.set(match.slotIndex, [...(bySlot.get(match.slotIndex) || []), match]));
+
+  [...bySlot.keys()].sort((a, b) => a - b).forEach(slotIndex => {
+    const templates = bySlot.get(slotIndex).sort((a, b) => a.courtId.localeCompare(b.courtId));
+    const fixedHere = preserved.filter(match => match.slotIndex === slotIndex).flatMap(idsIn);
+    const reserved = new Set([...activeIds, ...fixedHere]);
+    const needed = templates.length * 4;
+    const candidates = players.filter(player => !reserved.has(player.id));
+    if (candidates.length < needed) throw new Error("NO_VALID_REMIX");
+    const ranked = [...candidates].sort((a, b) => (playCounts[a.id] * 10 + byeCounts[a.id]) - (playCounts[b.id] * 10 + byeCounts[b.id]) || a.id.localeCompare(b.id));
+    const selected = ranked.slice(0, needed);
+    const teams = chooseTeams(selected, partnerCounts);
+    const matchups = chooseMatches(teams, opponentCounts);
+    const bye = players.filter(player => !selected.includes(player) && !fixedHere.includes(player.id)).map(player => player.id);
+    templates.forEach((template, index) => {
+      const [left, right] = matchups[index];
+      template.teamA = left.map(player => player.id);
+      template.teamB = right.map(player => player.id);
+      template.scoreA = "";
+      template.scoreB = "";
+      template.bye = bye;
+      addMatchHistory(template, playCounts, partnerCounts, opponentCounts);
+    });
+    bye.forEach(id => { byeCounts[id] = (byeCounts[id] || 0) + 1; });
+  });
+  return { schedule: copied, changedMatchId: targetMatchId };
+}

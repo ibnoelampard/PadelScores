@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateSchedule } from "../src/mixer.js";
+import { availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "../src/mixer.js";
 
 const players = Array.from({ length: 12 }, (_, i) => ({ id: `p${i + 1}`, name: `Player ${i + 1}`, matches: 0, byes: 0 }));
 const courts = [{ id: "c1", name: "Court 1" }, { id: "c2", name: "Court 2" }];
@@ -14,4 +14,33 @@ test("uses every partnership once before starting the partnership cycle again", 
 
   assert.equal(new Set(partnerships.slice(0, 6)).size, 6);
   assert.deepEqual(partnerships.slice(6, 8), partnerships.slice(0, 2));
+});
+test("replacement candidates exclude active and target players", () => {
+  const schedule = generateSchedule({ players, courts, durationHours: 1 }).schedule;
+  const target = schedule.find(match => match.id === "s2-c2");
+  const candidates = availableReplacementPlayers({ players, schedule, targetMatchId: target.id });
+  const blocked = new Set([...target.teamA, ...target.teamB, ...schedule.filter(match => match.started && !match.finished).flatMap(match => [...match.teamA, ...match.teamB])]);
+  assert.ok(candidates.every(player => !blocked.has(player.id)));
+  assert.ok(candidates.length > 0);
+});
+test("replaces a pending player and preserves active matches", () => {
+  const schedule = generateSchedule({ players, courts, durationHours: 1 }).schedule;
+  const target = schedule.find(match => match.id === "s2-c2");
+  const activeBefore = JSON.parse(JSON.stringify(schedule.filter(match => match.started && !match.finished)));
+  const replacement = availableReplacementPlayers({ players, schedule, targetMatchId: target.id })[0];
+  const result = replaceAndRemixSchedule({ players, courts, schedule, targetMatchId: target.id, outPlayerId: target.teamA[0], inPlayerId: replacement.id, changedAt: "2026-08-31T00:00:00.000Z" });
+  const changed = result.schedule.find(match => match.id === target.id);
+  assert.ok(changed.teamA.includes(replacement.id));
+  assert.equal(changed.replacements.length, 1);
+  assert.deepEqual(result.schedule.filter(match => match.started && !match.finished), activeBefore);
+  for (const slotIndex of new Set(result.schedule.map(match => match.slotIndex))) {
+    const ids = result.schedule.filter(match => match.slotIndex === slotIndex).flatMap(match => [...match.teamA, ...match.teamB]);
+    assert.equal(new Set(ids).size, ids.length);
+  }
+  assert.deepEqual(schedule, generateSchedule({ players, courts, durationHours: 1 }).schedule);
+});
+test("cannot replace a playing or completed match", () => {
+  const schedule = generateSchedule({ players, courts, durationHours: 1 }).schedule;
+  const target = schedule.find(match => match.started);
+  assert.throws(() => replaceAndRemixSchedule({ players, courts, schedule, targetMatchId: target.id, outPlayerId: target.teamA[0], inPlayerId: "p12" }), /MATCH_LOCKED/);
 });

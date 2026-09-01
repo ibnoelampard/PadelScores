@@ -1,6 +1,6 @@
 import { createI18n } from "./i18n.js";
 import { loadState, saveState, createEmptyState } from "./storage.js";
-import { availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
+import { addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
 import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
@@ -11,6 +11,8 @@ let expandedScheduleId = null;
 let activeSessionTab = "schedule";
 let replacementMatchId = null;
 let sessionNotice = "";
+let sessionMenuOpen = false;
+let sessionModal = null;
 
 const persist = () => saveState(state);
 const t = (key, variables) => i18n.t(key, variables);
@@ -31,7 +33,7 @@ const button = (text, className, handler, attrs = {}) => {
 };
 const courtName = court => t("court.label", { number: court.id.replace(/^c/, "") });
 
-function shell(title, subtitle) {
+function shell(title, subtitle, { sessionActions = false } = {}) {
   const root = el("div", { class: "app-shell" });
   const nextLanguage = i18n.getLanguage() === "id" ? "en" : "id";
   const languageButton = button(i18n.getLanguage().toUpperCase(), "icon-btn", () => {
@@ -43,8 +45,24 @@ function shell(title, subtitle) {
     el("h1", { class: "title", text: title }),
     el("div", { class: "subtle", text: subtitle })
   ]);
-  root.append(el("header", { class: "topbar" }, [heading, languageButton]));
+  const headerActions = sessionActions ? sessionActionsMenu() : languageButton;
+  root.append(el("header", { class: "topbar" }, [heading, headerActions]));
   return root;
+}
+
+function sessionActionsMenu() {
+  const wrap = el("div", { class: "session-actions" });
+  const toggle = button("⋯", "icon-btn", () => { sessionMenuOpen = !sessionMenuOpen; render(); }, { "aria-label": t("session.actions"), "aria-expanded": String(sessionMenuOpen) });
+  wrap.append(toggle);
+  if (!sessionMenuOpen) return wrap;
+  const menu = el("div", { class: "session-menu", role: "menu" });
+  menu.append(
+    button(t("session.addPlayer"), "menu-btn", () => { sessionModal = "add-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
+    button(t("session.extendDuration"), "menu-btn", () => { sessionModal = "extend-duration"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
+    el("div", { class: "menu-language" }, [el("span", { class: "menu-label", text: t("session.language") }), button("ID", `language-option ${i18n.getLanguage() === "id" ? "active" : ""}`, () => { i18n.setLanguage("id"); sessionMenuOpen = false; render(); }), button("EN", `language-option ${i18n.getLanguage() === "en" ? "active" : ""}`, () => { i18n.setLanguage("en"); sessionMenuOpen = false; render(); })])
+  );
+  wrap.append(menu);
+  return wrap;
 }
 
 function showError(node, message) {
@@ -171,7 +189,7 @@ function renderPlayers() {
 
 function renderSession() {
   const isLeaderboard = activeSessionTab === "leaderboard";
-  const root = shell(isLeaderboard ? t("leaderboard.title") : t("schedule.title"), isLeaderboard ? t("leaderboard.subtitle") : t("schedule.subtitle", { hours: state.session.durationHours }));
+  const root = shell(isLeaderboard ? t("leaderboard.title") : t("schedule.title"), isLeaderboard ? t("leaderboard.subtitle") : t("schedule.subtitle", { hours: state.session.durationHours }), { sessionActions: true });
   if (isLeaderboard) {
     renderLeaderboard(root);
     root.append(sessionTabs());
@@ -208,7 +226,64 @@ function renderSession() {
   }));
   root.append(actions);
   root.append(sessionTabs());
+  if (sessionModal) root.append(sessionModalView());
   app.append(root);
+}
+
+function closeSessionModal() {
+  sessionModal = null;
+  render();
+}
+
+function sessionModalView() {
+  const isPlayer = sessionModal === "add-player";
+  const backdrop = el("div", { class: "modal-backdrop" });
+  const panel = el("form", { class: "modal-sheet", role: "dialog", "aria-modal": "true" });
+  const error = el("div", { class: "error", role: "alert" });
+  error.hidden = true;
+  const input = el("input", { class: "input", type: isPlayer ? "text" : "number", id: isPlayer ? "new-player-name" : "extra-duration", inputmode: isPlayer ? "text" : "decimal", autocomplete: "off" });
+  if (!isPlayer) { input.min = "0.1"; input.step = "0.1"; }
+  panel.append(
+    el("div", { class: "modal-head" }, [el("h2", { text: t(isPlayer ? "playerAdd.title" : "durationAdd.title") }), button("×", "modal-close", closeSessionModal, { "aria-label": t("common.cancel") })]),
+    el("p", { class: "subtle", text: t(isPlayer ? "playerAdd.description" : "durationAdd.description") }),
+    el("label", { for: input.id, text: t(isPlayer ? "playerAdd.name" : "durationAdd.hours") }), input,
+    error,
+    el("div", { class: "modal-actions" }, [button(t("common.cancel"), "secondary-btn", closeSessionModal), button(t(isPlayer ? "playerAdd.submit" : "durationAdd.submit"), "primary-btn", event => {
+      event.preventDefault();
+      if (isPlayer) {
+        const name = input.value.trim();
+        if (!name) return showError(error, t("validation.playerRequired"));
+        if (state.players.some(player => player.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) return showError(error, t("validation.playerDuplicate"));
+        const used = new Set(state.players.map(player => player.id));
+        let nextNumber = state.players.reduce((max, player) => Math.max(max, Number(player.id.match(/^p(\d+)$/)?.[1] || 0)), 0) + 1;
+        while (used.has(`p${nextNumber}`)) nextNumber += 1;
+        const newPlayer = { id: `p${nextNumber}`, name };
+        const result = addPlayerAndRemixSchedule({ players: state.players, newPlayer, courts: state.courts, schedule: state.schedule });
+        state.players = result.players;
+        state.session.playerCount = state.players.length;
+        state.schedule = result.schedule;
+        sessionModal = null;
+        sessionNotice = state.schedule.some(match => !match.started && !match.finished) ? t("playerAdd.success", { name }) : t("playerAdd.noPending", { name });
+      } else {
+        const hours = Number(input.value);
+        if (!Number.isFinite(hours) || hours <= 0) return showError(error, t("validation.durationInvalid"));
+        try {
+          const result = appendScheduleSlots({ players: state.players, courts: state.courts, schedule: state.schedule, additionalHours: hours });
+          state.schedule = result.schedule;
+          state.session.durationHours = Number((state.session.durationHours + hours).toFixed(2));
+          sessionModal = null;
+          sessionNotice = t("durationAdd.success", { count: result.addedSlotCount });
+        } catch {
+          return showError(error, t("durationAdd.error"));
+        }
+      }
+      persist();
+      render();
+    })])
+  );
+  backdrop.append(panel);
+  setTimeout(() => input.focus(), 0);
+  return backdrop;
 }
 
 function sessionTabs() {

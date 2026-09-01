@@ -25,3 +25,13 @@ test("stores a manual language choice and updates the document language", () => 
   assert.equal(attributes.get("lang"), "en");
   assert.equal(i18n.t("setup.create"), "Create Match");
 });
+
+test("translates session expansion actions and modal copy", () => {
+  const storage = { getItem: () => null, setItem() {} };
+  const i18n = createI18n({ storage, browserLanguage: "id-ID", root: { setAttribute() {} } });
+  assert.equal(i18n.t("session.addPlayer"), "Tambah pemain");
+  assert.match(i18n.t("playerAdd.success", { name: "Ibnu" }), /Ibnu/);
+  i18n.setLanguage("en");
+  assert.equal(i18n.t("session.extendDuration"), "Extend duration");
+  assert.match(i18n.t("durationAdd.success", { count: 6 }), /6/);
+});

@@ -1,6 +1,6 @@
 import { createI18n } from "./i18n.js";
 import { loadState, saveState, createEmptyState } from "./storage.js";
-import { addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
+import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
 import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
@@ -33,6 +33,26 @@ const button = (text, className, handler, attrs = {}) => {
 };
 const courtName = court => t("court.label", { number: court.id.replace(/^c/, "") });
 
+function addCourtToSession() {
+  const used = new Set(state.courts.map(court => court.id));
+  let nextNumber = state.courts.reduce((max, court) => Math.max(max, Number(court.id.match(/^c(\d+)$/)?.[1] || 0)), 0) + 1;
+  while (used.has(`c${nextNumber}`)) nextNumber += 1;
+  const newCourt = { id: `c${nextNumber}`, name: `Court ${nextNumber}` };
+  try {
+    const result = addCourtAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, newCourt });
+    state.courts = result.courts;
+    state.session.courtCount = state.courts.length;
+    state.schedule = result.schedule;
+    activeCourtId = newCourt.id;
+    sessionNotice = t("courtAdd.success", { number: nextNumber });
+    persist();
+    render();
+  } catch {
+    sessionNotice = t("courtAdd.error");
+    render();
+  }
+}
+
 function shell(title, subtitle, { sessionActions = false } = {}) {
   const root = el("div", { class: "app-shell" });
   const nextLanguage = i18n.getLanguage() === "id" ? "en" : "id";
@@ -58,6 +78,7 @@ function sessionActionsMenu() {
   const menu = el("div", { class: "session-menu", role: "menu" });
   menu.append(
     button(t("session.addPlayer"), "menu-btn", () => { sessionModal = "add-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
+    button(t("session.addCourt"), "menu-btn", () => { sessionMenuOpen = false; addCourtToSession(); }, { role: "menuitem" }),
     button(t("session.extendDuration"), "menu-btn", () => { sessionModal = "extend-duration"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     el("div", { class: "menu-language" }, [el("span", { class: "menu-label", text: t("session.language") }), button("ID", `language-option ${i18n.getLanguage() === "id" ? "active" : ""}`, () => { i18n.setLanguage("id"); sessionMenuOpen = false; render(); }), button("EN", `language-option ${i18n.getLanguage() === "en" ? "active" : ""}`, () => { i18n.setLanguage("en"); sessionMenuOpen = false; render(); })])
   );

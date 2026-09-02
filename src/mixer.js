@@ -158,6 +158,35 @@ export function addPlayerAndRemixSchedule({ players, newPlayer, courts, schedule
   return { players: nextPlayers, schedule: copied, changedAt };
 }
 
+export function addCourtAndRemixSchedule({ players, courts, schedule, newCourt }) {
+  if (!newCourt?.id || courts.some(court => court.id === newCourt.id)) throw new Error("COURT_ID_DUPLICATE");
+  const nextCourts = [...courts.map(court => ({ ...court })), { ...newCourt }];
+  const copied = schedule.map(cloneMatch);
+  const pending = copied.filter(match => !match.started && !match.finished);
+  if (!pending.length) return { courts: nextCourts, schedule: copied };
+
+  const firstPendingSlot = Math.min(...pending.map(match => match.slotIndex));
+  const state = historyFromSchedule(copied.filter(match => match.slotIndex < firstPendingSlot || match.started || match.finished), players);
+  const oldMatchCapacity = Math.floor(Math.min(players.length, courts.length * 4) / 4);
+  const nextMatchCapacity = Math.floor(Math.min(players.length, nextCourts.length * 4) / 4);
+  const slotIndexes = [...new Set(pending.map(match => match.slotIndex))].sort((a, b) => a - b);
+
+  slotIndexes.forEach(slotIndex => {
+    if (copied.some(match => match.slotIndex === slotIndex && match.started && !match.finished)) return;
+    const templates = copied.filter(match => match.slotIndex === slotIndex && !match.started && !match.finished).sort((a, b) => a.courtId.localeCompare(b.courtId)).map(match => ({ match }));
+    if (templates.length < nextMatchCapacity && nextMatchCapacity > oldMatchCapacity) templates.push({ courtId: newCourt.id });
+    const fixedIds = copied.filter(match => match.slotIndex === slotIndex && (match.started || match.finished)).flatMap(idsIn);
+    templates.forEach(template => { template.fixedIds = fixedIds; });
+    const replacement = createSlot({ players, courts: nextCourts, slotIndex, state, templates });
+    let index = 0;
+    copied.forEach((match, matchIndex) => {
+      if (match.slotIndex === slotIndex && !match.started && !match.finished) copied[matchIndex] = replacement[index++];
+    });
+    if (replacement.length > templates.filter(template => template.match).length) copied.push(...replacement.slice(templates.filter(template => template.match).length));
+  });
+  return { courts: nextCourts, schedule: copied };
+}
+
 export function appendScheduleSlots({ players, courts, schedule, additionalHours }) {
   const hours = Number(additionalHours);
   if (!Number.isFinite(hours) || hours <= 0) throw new Error("DURATION_INVALID");

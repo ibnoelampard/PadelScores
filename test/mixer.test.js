@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "../src/mixer.js";
+import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "../src/mixer.js";
 
 const players = Array.from({ length: 12 }, (_, i) => ({ id: `p${i + 1}`, name: `Player ${i + 1}`, matches: 0, byes: 0 }));
 const courts = [{ id: "c1", name: "Court 1" }, { id: "c2", name: "Court 2" }];
@@ -99,4 +99,33 @@ test("includes a new player in appended slots", () => {
     const ids = added.filter(match => match.slotIndex === slot).flatMap(match => [...match.teamA, ...match.teamB]);
     assert.equal(new Set(ids).size, ids.length);
   }
+});
+
+test("adds a court to pending slots while preserving active and finished matches", () => {
+  const schedule = generateSchedule({ players, courts, durationHours: 1 }).schedule;
+  schedule[0].started = true;
+  schedule[0].scoreA = "6";
+  schedule[1].finished = true;
+  schedule[1].scoreB = "7";
+  const lockedBefore = JSON.parse(JSON.stringify(schedule.filter(match => match.started || match.finished)));
+  const newCourt = { id: "c3", name: "Court 3" };
+
+  const result = addCourtAndRemixSchedule({ players, courts, schedule, newCourt });
+
+  assert.deepEqual(result.courts, [...courts, newCourt]);
+  assert.deepEqual(result.schedule.filter(match => match.started || match.finished), lockedBefore);
+  assert.equal(result.schedule.filter(match => match.slotIndex === 0).length, 2);
+  assert.equal(result.schedule.filter(match => match.slotIndex === 1).length, 3);
+  assert.ok(result.schedule.filter(match => match.courtId === newCourt.id).every(match => match.slotIndex > 0));
+});
+
+test("does not schedule the new court into a slot that is already in progress", () => {
+  const schedule = generateSchedule({ players, courts, durationHours: 1 }).schedule;
+  schedule[0].started = true;
+  const newCourt = { id: "c3", name: "Court 3" };
+  const result = addCourtAndRemixSchedule({ players, courts, schedule, newCourt });
+
+  assert.equal(result.schedule.filter(match => match.slotIndex === 0).length, 2);
+  assert.equal(result.schedule.filter(match => match.courtId === newCourt.id && match.slotIndex === 0).length, 0);
+  assert.ok(result.schedule.some(match => match.courtId === newCourt.id && match.slotIndex === 1));
 });

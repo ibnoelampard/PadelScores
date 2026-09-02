@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "../src/mixer.js";
+import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, removeCourtAndRemixSchedule, removePlayerAndRemixSchedule, replaceAndRemixSchedule } from "../src/mixer.js";
 
 const players = Array.from({ length: 12 }, (_, i) => ({ id: `p${i + 1}`, name: `Player ${i + 1}`, matches: 0, byes: 0 }));
 const courts = [{ id: "c1", name: "Court 1" }, { id: "c2", name: "Court 2" }];
@@ -128,4 +128,44 @@ test("does not schedule the new court into a slot that is already in progress", 
   assert.equal(result.schedule.filter(match => match.slotIndex === 0).length, 2);
   assert.equal(result.schedule.filter(match => match.courtId === newCourt.id && match.slotIndex === 0).length, 0);
   assert.ok(result.schedule.some(match => match.courtId === newCourt.id && match.slotIndex === 1));
+});
+
+test("fills a second court in future slots when added players bring the roster to eight", () => {
+  const startingPlayers = players.slice(0, 4);
+  const schedule = generateSchedule({ players: startingPlayers, courts: [courts[0]], durationHours: 1 }).schedule;
+  schedule[0].started = true;
+  const withCourt = addCourtAndRemixSchedule({ players: startingPlayers, courts: [courts[0]], schedule, newCourt: courts[1] });
+  let result = { players: startingPlayers, schedule: withCourt.schedule };
+  players.slice(4, 8).forEach(player => {
+    result = addPlayerAndRemixSchedule({ players: result.players, newPlayer: player, courts: withCourt.courts, schedule: result.schedule });
+  });
+
+  assert.ok(result.schedule.some(match => match.courtId === "c2" && match.slotIndex === 1));
+});
+
+test("removes a player from future rotations but keeps completed matches", () => {
+  const schedule = generateSchedule({ players: players.slice(0, 8), courts, durationHours: 1 }).schedule;
+  schedule[0].finished = true;
+  const completed = JSON.parse(JSON.stringify(schedule.filter(match => match.finished)));
+  const result = removePlayerAndRemixSchedule({ players: players.slice(0, 8), courts, schedule, playerId: "p8" });
+
+  assert.ok(result.players.find(player => player.id === "p8").removed);
+  assert.deepEqual(result.schedule.filter(match => match.finished), completed);
+  assert.ok(result.schedule.filter(match => !match.finished).every(match => ![...match.teamA, ...match.teamB].includes("p8")));
+});
+
+test("does not remove a player who is currently playing", () => {
+  const schedule = generateSchedule({ players: players.slice(0, 8), courts, durationHours: 1 }).schedule;
+  schedule[0].started = true;
+  assert.throws(() => removePlayerAndRemixSchedule({ players: players.slice(0, 8), courts, schedule, playerId: schedule[0].teamA[0] }), /PLAYER_ACTIVE/);
+});
+
+test("removes a court from future rotations while preserving its completed matches", () => {
+  const schedule = generateSchedule({ players: players.slice(0, 8), courts, durationHours: 1 }).schedule;
+  schedule[0].finished = true;
+  const result = removeCourtAndRemixSchedule({ players: players.slice(0, 8), courts, schedule, courtId: "c2" });
+
+  assert.ok(result.courts.find(court => court.id === "c2").removed);
+  assert.ok(result.schedule.some(match => match.id === schedule[0].id));
+  assert.ok(result.schedule.filter(match => !match.finished).every(match => match.courtId !== "c2"));
 });

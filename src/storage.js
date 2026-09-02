@@ -13,8 +13,8 @@ export function normalizeState(value) {
   const durationHours = Math.max(0, Number(session.durationHours) || 0);
   const statuses = new Set(["empty", "setup", "players", "schedule", "finished"]);
   base.session = { status: statuses.has(session.status) ? session.status : "empty", playerCount, courtCount, durationHours, slotMinutes: 10 };
-  base.players = Array.isArray(value.players) ? value.players.map((player, index) => ({ id: String(player.id || `p${index + 1}`), name: String(player.name || ""), matches: Number(player.matches) || 0, wins: Number(player.wins) || 0, byes: Number(player.byes) || 0 })) : [];
-  base.courts = Array.isArray(value.courts) ? value.courts.map((court, index) => ({ id: String(court.id || `c${index + 1}`), name: String(court.name || `Court ${index + 1}`) })) : [];
+  base.players = Array.isArray(value.players) ? value.players.map((player, index) => ({ id: String(player.id || `p${index + 1}`), name: String(player.name || ""), matches: Number(player.matches) || 0, wins: Number(player.wins) || 0, byes: Number(player.byes) || 0, removed: Boolean(player.removed) })) : [];
+  base.courts = Array.isArray(value.courts) ? value.courts.map((court, index) => ({ id: String(court.id || `c${index + 1}`), name: String(court.name || `Court ${index + 1}`), removed: Boolean(court.removed) })) : [];
   base.schedule = Array.isArray(value.schedule) ? value.schedule.map((item, index) => {
     const replacements = Array.isArray(item?.replacements) ? item.replacements.filter(change => change && typeof change.outPlayerId === "string" && typeof change.inPlayerId === "string" && typeof change.changedAt === "string").map(change => ({ outPlayerId: change.outPlayerId, inPlayerId: change.inPlayerId, changedAt: change.changedAt })) : [];
     return { ...item, id: String(item?.id || `s${index + 1}`), teamA: Array.isArray(item?.teamA) ? item.teamA.map(String) : [], teamB: Array.isArray(item?.teamB) ? item.teamB.map(String) : [], scoreA: String(item?.scoreA ?? ""), scoreB: String(item?.scoreB ?? ""), started: Boolean(item?.started), finished: Boolean(item?.finished), replacements };

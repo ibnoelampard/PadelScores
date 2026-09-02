@@ -1,6 +1,6 @@
 import { createI18n } from "./i18n.js";
 import { loadState, saveState, createEmptyState } from "./storage.js";
-import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, replaceAndRemixSchedule } from "./mixer.js";
+import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, removeCourtAndRemixSchedule, removePlayerAndRemixSchedule, replaceAndRemixSchedule } from "./mixer.js";
 import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
@@ -78,7 +78,9 @@ function sessionActionsMenu() {
   const menu = el("div", { class: "session-menu", role: "menu" });
   menu.append(
     button(t("session.addPlayer"), "menu-btn", () => { sessionModal = "add-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
+    button(t("session.removePlayer"), "menu-btn", () => { sessionModal = "remove-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     button(t("session.addCourt"), "menu-btn", () => { sessionMenuOpen = false; addCourtToSession(); }, { role: "menuitem" }),
+    button(t("session.removeCourt"), "menu-btn", () => { sessionModal = "remove-court"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     button(t("session.extendDuration"), "menu-btn", () => { sessionModal = "extend-duration"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     el("div", { class: "menu-language" }, [el("span", { class: "menu-label", text: t("session.language") }), button("ID", `language-option ${i18n.getLanguage() === "id" ? "active" : ""}`, () => { i18n.setLanguage("id"); sessionMenuOpen = false; render(); }), button("EN", `language-option ${i18n.getLanguage() === "en" ? "active" : ""}`, () => { i18n.setLanguage("en"); sessionMenuOpen = false; render(); })])
   );
@@ -218,7 +220,9 @@ function renderSession() {
     return;
   }
   const tabs = el("nav", { class: "court-tabs", "aria-label": t("schedule.chooseCourt") });
-  state.courts.forEach(court => tabs.append(button(courtName(court), `court-tab ${court.id === activeCourtId ? "active" : ""}`, () => {
+  const availableCourts = state.courts.filter(court => !court.removed);
+  if (!availableCourts.some(court => court.id === activeCourtId)) activeCourtId = availableCourts[0]?.id || "";
+  availableCourts.forEach(court => tabs.append(button(courtName(court), `court-tab ${court.id === activeCourtId ? "active" : ""}`, () => {
     activeCourtId = court.id;
     expandedScheduleId = null;
     replacementMatchId = null;
@@ -227,7 +231,7 @@ function renderSession() {
   root.append(tabs);
   if (sessionNotice) root.append(el("div", { class: "success", role: "status", text: sessionNotice }));
   const list = el("section");
-  const court = state.courts.find(item => item.id === activeCourtId) || state.courts[0];
+  const court = availableCourts.find(item => item.id === activeCourtId) || availableCourts[0];
   const items = state.schedule.filter(item => item.courtId === court.id);
   const activeItem = items.find(item => item.started && !item.finished);
   const nextItem = items.find(item => !item.finished && !item.started);
@@ -258,20 +262,29 @@ function closeSessionModal() {
 
 function sessionModalView() {
   const isPlayer = sessionModal === "add-player";
+  const isRemovePlayer = sessionModal === "remove-player";
+  const isRemoveCourt = sessionModal === "remove-court";
+  const isRemoval = isRemovePlayer || isRemoveCourt;
   const backdrop = el("div", { class: "modal-backdrop" });
   const panel = el("form", { class: "modal-sheet", role: "dialog", "aria-modal": "true" });
   const error = el("div", { class: "error", role: "alert" });
   error.hidden = true;
-  const input = el("input", { class: "input", type: isPlayer ? "text" : "number", id: isPlayer ? "new-player-name" : "extra-duration", inputmode: isPlayer ? "text" : "decimal", autocomplete: "off" });
+  const input = isRemoval ? el("select", { class: "input", id: isRemovePlayer ? "remove-player" : "remove-court" }) : el("input", { class: "input", type: isPlayer ? "text" : "number", id: isPlayer ? "new-player-name" : "extra-duration", inputmode: isPlayer ? "text" : "decimal", autocomplete: "off" });
+  if (isRemovePlayer) state.players.filter(player => !player.removed).forEach(player => input.append(el("option", { value: player.id, text: player.name })));
+  if (isRemoveCourt) state.courts.filter(court => !court.removed).forEach(court => input.append(el("option", { value: court.id, text: courtName(court) })));
   if (!isPlayer) { input.min = "0.1"; input.step = "0.1"; }
   panel.append(
-    el("div", { class: "modal-head" }, [el("h2", { text: t(isPlayer ? "playerAdd.title" : "durationAdd.title") }), button("×", "modal-close", closeSessionModal, { "aria-label": t("common.cancel") })]),
-    el("p", { class: "subtle", text: t(isPlayer ? "playerAdd.description" : "durationAdd.description") }),
-    el("label", { for: input.id, text: t(isPlayer ? "playerAdd.name" : "durationAdd.hours") }), input,
+    el("div", { class: "modal-head" }, [el("h2", { text: t(isRemovePlayer ? "playerRemove.title" : isRemoveCourt ? "courtRemove.title" : isPlayer ? "playerAdd.title" : "durationAdd.title") }), button("×", "modal-close", closeSessionModal, { "aria-label": t("common.cancel") })]),
+    el("p", { class: "subtle", text: t(isRemovePlayer ? "playerRemove.description" : isRemoveCourt ? "courtRemove.description" : isPlayer ? "playerAdd.description" : "durationAdd.description") }),
+    el("label", { for: input.id, text: t(isRemovePlayer ? "playerRemove.label" : isRemoveCourt ? "courtRemove.label" : isPlayer ? "playerAdd.name" : "durationAdd.hours") }), input,
     error,
-    el("div", { class: "modal-actions" }, [button(t("common.cancel"), "secondary-btn", closeSessionModal), button(t(isPlayer ? "playerAdd.submit" : "durationAdd.submit"), "primary-btn", event => {
+    el("div", { class: "modal-actions" }, [button(t("common.cancel"), "secondary-btn", closeSessionModal), button(t(isRemovePlayer ? "playerRemove.submit" : isRemoveCourt ? "courtRemove.submit" : isPlayer ? "playerAdd.submit" : "durationAdd.submit"), "primary-btn", event => {
       event.preventDefault();
-      if (isPlayer) {
+      if (isRemovePlayer) {
+        try { const result = removePlayerAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, playerId: input.value }); state.players = result.players; state.session.playerCount = state.players.filter(player => !player.removed).length; sessionNotice = t("playerRemove.success"); sessionModal = null; } catch { return showError(error, t("playerRemove.error")); }
+      } else if (isRemoveCourt) {
+        try { const result = removeCourtAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, courtId: input.value }); state.courts = result.courts; state.session.courtCount = state.courts.filter(court => !court.removed).length; activeCourtId = state.courts.find(court => !court.removed)?.id || ""; sessionNotice = t("courtRemove.success"); sessionModal = null; } catch { return showError(error, t("courtRemove.error")); }
+      } else if (isPlayer) {
         const name = input.value.trim();
         if (!name) return showError(error, t("validation.playerRequired"));
         if (state.players.some(player => player.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) return showError(error, t("validation.playerDuplicate"));
@@ -321,7 +334,7 @@ function sessionTabs() {
 }
 
 function renderLeaderboard(root) {
-  const standings = calculateLeaderboard(state.players, state.schedule);
+  const standings = calculateLeaderboard(state.players.filter(player => !player.removed), state.schedule);
   const section = el("section", { class: "leaderboard" });
   section.append(el("div", { class: "section-head" }, [
     el("h2", { text: t("leaderboard.heading") }),
@@ -349,6 +362,7 @@ function renderLeaderboard(root) {
 function scheduleCard(item, expanded, canStart) {
   const names = id => state.players.find(player => player.id === id)?.name || "-";
   const active = item.started && !item.finished;
+  const historicalMatch = state.courts.some(court => court.id === item.courtId && court.removed) || [...item.teamA, ...item.teamB].some(id => state.players.find(player => player.id === id)?.removed);
   const card = el("article", { class: `schedule-item ${item.finished ? "done" : active ? "live" : ""} ${expanded && active ? "expanded" : "collapsed"}` });
   const status = active ? t("status.playing") : "";
   if (status) card.append(el("div", { class: "slot-head status-row" }, [el("span", { class: "live-text", text: status })]));
@@ -357,7 +371,7 @@ function scheduleCard(item, expanded, canStart) {
   if (!active) {
     match.append(el("div", { class: "collapsed-score", text: item.scoreA || item.scoreB ? `${item.scoreA || 0} — ${item.scoreB || 0}` : "—" }), el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
     card.append(match);
-    if (item.finished) card.append(button(t("match.edit"), "more-btn", () => {
+    if (item.finished && !historicalMatch) card.append(button(t("match.edit"), "more-btn", () => {
       item.finished = false;
       item.started = true;
       expandedScheduleId = item.id;

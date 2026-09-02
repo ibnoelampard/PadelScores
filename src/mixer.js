@@ -1,5 +1,7 @@
 const pairKey = (a, b) => [a, b].sort().join("|");
 const idsIn = match => [...(match.teamA || []), ...(match.teamB || [])];
+const activePlayers = players => players.filter(player => !player.removed);
+const activeCourts = courts => courts.filter(court => !court.removed);
 
 function partnershipCount(partnerCounts, team) {
   return partnerCounts.get(pairKey(team[0].id, team[1].id)) || 0;
@@ -113,10 +115,10 @@ function createSlot({ players, courts, slotIndex, state, priorityId, templates =
     const [leftTeam, rightTeam] = matches[index];
     return {
       ...(template.match || {}),
-      id: template.match?.id || `s${slotIndex + 1}-${courts[index].id}`,
+      id: template.match?.id || `s${slotIndex + 1}-${template.courtId || courts[index].id}`,
       slotIndex,
       startMinute: slotIndex * 10,
-      courtId: template.match?.courtId || courts[index].id,
+      courtId: template.match?.courtId || template.courtId || courts[index].id,
       teamA: leftTeam.map(player => player.id),
       teamB: rightTeam.map(player => player.id),
       scoreA: template.match?.scoreA || "",
@@ -133,58 +135,63 @@ function createSlot({ players, courts, slotIndex, state, priorityId, templates =
   return result;
 }
 
+function remixPendingSchedule({ players, courts, schedule, priorityId, skipLiveSlots = false }) {
+  const playablePlayers = activePlayers(players);
+  const playableCourts = activeCourts(courts);
+  let copied = schedule.map(cloneMatch);
+  const pending = copied.filter(match => !match.started && !match.finished);
+  if (!pending.length) return copied;
+  const firstPendingSlot = Math.min(...pending.map(match => match.slotIndex));
+  const state = historyFromSchedule(copied.filter(match => match.slotIndex < firstPendingSlot || match.started || match.finished), playablePlayers);
+  const slotIndexes = [...new Set(pending.map(match => match.slotIndex))].sort((a, b) => a - b);
+  const capacity = Math.floor(Math.min(playablePlayers.length, playableCourts.length * 4) / 4);
+
+  slotIndexes.forEach(slotIndex => {
+    const live = copied.some(match => match.slotIndex === slotIndex && match.started && !match.finished);
+    if (skipLiveSlots && live) return;
+    const locked = copied.filter(match => match.slotIndex === slotIndex && (match.started || match.finished));
+    const desiredPending = Math.max(0, capacity - locked.length);
+    const existing = copied.filter(match => match.slotIndex === slotIndex && !match.started && !match.finished && playableCourts.some(court => court.id === match.courtId)).sort((a, b) => a.courtId.localeCompare(b.courtId));
+    const templates = existing.slice(0, desiredPending).map(match => ({ match }));
+    const usedCourtIds = new Set([...locked, ...templates.map(template => template.match)].map(match => match.courtId));
+    playableCourts.filter(court => !usedCourtIds.has(court.id)).slice(0, Math.max(0, desiredPending - templates.length)).forEach(court => templates.push({ courtId: court.id }));
+    const fixedIds = locked.flatMap(idsIn);
+    templates.forEach(template => { template.fixedIds = fixedIds; });
+    const replacement = templates.length ? createSlot({ players: playablePlayers, courts: playableCourts, slotIndex, state, priorityId, templates }) : [];
+    copied = [...copied.filter(match => !(match.slotIndex === slotIndex && !match.started && !match.finished)), ...replacement];
+  });
+  return copied;
+}
+
 export function addPlayerAndRemixSchedule({ players, newPlayer, courts, schedule, changedAt = new Date().toISOString() }) {
   const name = String(newPlayer?.name || "").trim();
   if (!name) throw new Error("PLAYER_NAME_REQUIRED");
   if (players.some(player => player.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("PLAYER_NAME_DUPLICATE");
   if (!newPlayer?.id || players.some(player => player.id === newPlayer.id)) throw new Error("PLAYER_ID_DUPLICATE");
   const nextPlayers = [...players.map(player => ({ ...player })), { id: newPlayer.id, name, matches: 0, wins: 0, byes: 0 }];
-  const copied = schedule.map(cloneMatch);
-  const pending = copied.filter(match => !match.started && !match.finished);
-  if (!pending.length) return { players: nextPlayers, schedule: copied, changedAt };
-  const firstPendingSlot = Math.min(...pending.map(match => match.slotIndex));
-  const state = historyFromSchedule(copied.filter(match => match.slotIndex < firstPendingSlot || match.started || match.finished), nextPlayers);
-  const slotIndexes = [...new Set(pending.filter(match => match.slotIndex >= firstPendingSlot).map(match => match.slotIndex))].sort((a, b) => a - b);
-  slotIndexes.forEach(slotIndex => {
-    const templates = copied.filter(match => match.slotIndex === slotIndex && !match.started && !match.finished).sort((a, b) => a.courtId.localeCompare(b.courtId)).map(match => ({ match }));
-    const fixedIds = copied.filter(match => match.slotIndex === slotIndex && (match.started || match.finished)).flatMap(idsIn);
-    templates.forEach(template => { template.fixedIds = fixedIds; });
-    const replacement = createSlot({ players: nextPlayers, courts: templates.map(template => ({ id: template.match.courtId })), slotIndex, state, priorityId: newPlayer.id, templates });
-    let index = 0;
-    copied.forEach((match, matchIndex) => {
-      if (match.slotIndex === slotIndex && !match.started && !match.finished) copied[matchIndex] = replacement[index++];
-    });
-  });
-  return { players: nextPlayers, schedule: copied, changedAt };
+  return { players: nextPlayers, schedule: remixPendingSchedule({ players: nextPlayers, courts, schedule, priorityId: newPlayer.id }), changedAt };
 }
 
 export function addCourtAndRemixSchedule({ players, courts, schedule, newCourt }) {
   if (!newCourt?.id || courts.some(court => court.id === newCourt.id)) throw new Error("COURT_ID_DUPLICATE");
   const nextCourts = [...courts.map(court => ({ ...court })), { ...newCourt }];
-  const copied = schedule.map(cloneMatch);
-  const pending = copied.filter(match => !match.started && !match.finished);
-  if (!pending.length) return { courts: nextCourts, schedule: copied };
+  return { courts: nextCourts, schedule: remixPendingSchedule({ players, courts: nextCourts, schedule, skipLiveSlots: true }) };
+}
 
-  const firstPendingSlot = Math.min(...pending.map(match => match.slotIndex));
-  const state = historyFromSchedule(copied.filter(match => match.slotIndex < firstPendingSlot || match.started || match.finished), players);
-  const oldMatchCapacity = Math.floor(Math.min(players.length, courts.length * 4) / 4);
-  const nextMatchCapacity = Math.floor(Math.min(players.length, nextCourts.length * 4) / 4);
-  const slotIndexes = [...new Set(pending.map(match => match.slotIndex))].sort((a, b) => a - b);
+export function removePlayerAndRemixSchedule({ players, courts, schedule, playerId }) {
+  const target = players.find(player => player.id === playerId && !player.removed);
+  if (!target) throw new Error("PLAYER_NOT_FOUND");
+  if (schedule.some(match => match.started && !match.finished && idsIn(match).includes(playerId))) throw new Error("PLAYER_ACTIVE");
+  const nextPlayers = players.map(player => player.id === playerId ? { ...player, removed: true } : { ...player });
+  return { players: nextPlayers, schedule: remixPendingSchedule({ players: nextPlayers, courts, schedule }) };
+}
 
-  slotIndexes.forEach(slotIndex => {
-    if (copied.some(match => match.slotIndex === slotIndex && match.started && !match.finished)) return;
-    const templates = copied.filter(match => match.slotIndex === slotIndex && !match.started && !match.finished).sort((a, b) => a.courtId.localeCompare(b.courtId)).map(match => ({ match }));
-    if (templates.length < nextMatchCapacity && nextMatchCapacity > oldMatchCapacity) templates.push({ courtId: newCourt.id });
-    const fixedIds = copied.filter(match => match.slotIndex === slotIndex && (match.started || match.finished)).flatMap(idsIn);
-    templates.forEach(template => { template.fixedIds = fixedIds; });
-    const replacement = createSlot({ players, courts: nextCourts, slotIndex, state, templates });
-    let index = 0;
-    copied.forEach((match, matchIndex) => {
-      if (match.slotIndex === slotIndex && !match.started && !match.finished) copied[matchIndex] = replacement[index++];
-    });
-    if (replacement.length > templates.filter(template => template.match).length) copied.push(...replacement.slice(templates.filter(template => template.match).length));
-  });
-  return { courts: nextCourts, schedule: copied };
+export function removeCourtAndRemixSchedule({ players, courts, schedule, courtId }) {
+  const target = courts.find(court => court.id === courtId && !court.removed);
+  if (!target) throw new Error("COURT_NOT_FOUND");
+  if (schedule.some(match => match.courtId === courtId && match.started && !match.finished)) throw new Error("COURT_ACTIVE");
+  const nextCourts = courts.map(court => court.id === courtId ? { ...court, removed: true } : { ...court });
+  return { courts: nextCourts, schedule: remixPendingSchedule({ players, courts: nextCourts, schedule }) };
 }
 
 export function appendScheduleSlots({ players, courts, schedule, additionalHours }) {
@@ -207,7 +214,7 @@ export function availableReplacementPlayers({ players, schedule, targetMatchId }
   const target = schedule.find(match => match.id === targetMatchId);
   if (!target) return [];
   const unavailable = new Set([...idsIn(target), ...schedule.filter(match => match.started && !match.finished).flatMap(idsIn)]);
-  return players.filter(player => !unavailable.has(player.id));
+  return activePlayers(players).filter(player => !unavailable.has(player.id));
 }
 
 function addMatchHistory(match, playCounts, partnerCounts, opponentCounts) {

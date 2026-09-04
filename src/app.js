@@ -253,7 +253,7 @@ function renderSession() {
   if (!expandedScheduleId || !items.some(item => item.id === expandedScheduleId)) expandedScheduleId = activeItem?.id || nextItem?.id;
   const courtHeadingActions = el("div", { class: "court-heading-actions" }, [
     el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) }),
-    button(t("courtRemove.action"), "close-court-btn", () => closeCourtFromPage(court), { "aria-label": t("courtRemove.action") })
+    button(`× ${t("courtRemove.action")}`, "close-court-btn", () => closeCourtFromPage(court), { "aria-label": t("courtRemove.action") })
   ]);
   list.append(el("div", { class: "section-head" }, [el("h2", { text: courtName(court) }), courtHeadingActions]));
   items.forEach(item => list.append(scheduleCard(item, item.id === expandedScheduleId, !activeItem && item.id === nextItem?.id)));
@@ -390,7 +390,7 @@ function scheduleCard(item, expanded, canStart) {
   if (!active) {
     match.append(el("div", { class: "collapsed-score", text: item.scoreA || item.scoreB ? `${item.scoreA || 0} — ${item.scoreB || 0}` : "—" }), el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
     card.append(match);
-    if (item.finished && !historicalMatch) card.append(button(t("match.edit"), "more-btn", () => {
+    if (item.finished && !historicalMatch) card.append(button(`✎ ${t("match.edit")}`, "more-btn", () => {
       item.finished = false;
       item.started = true;
       expandedScheduleId = item.id;
@@ -399,14 +399,14 @@ function scheduleCard(item, expanded, canStart) {
     }));
     else {
       const actions = el("div", { class: "match-actions" });
-      if (canStart) actions.append(button(t("match.start"), "more-btn start-btn", () => {
+      if (canStart) actions.append(button(`▶ ${t("match.start")}`, "more-btn start-btn", () => {
         item.started = true;
         replacementMatchId = null;
         expandedScheduleId = item.id;
         persist();
         render();
       }));
-      actions.append(button(t("match.replace"), "more-btn", () => {
+      actions.append(button(`⇄ ${t("match.replace")}`, "more-btn", () => {
         replacementMatchId = replacementMatchId === item.id ? null : item.id;
         expandedScheduleId = item.id;
         render();
@@ -427,7 +427,7 @@ function scheduleCard(item, expanded, canStart) {
     scores.append(input);
   });
   match.append(scores, el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
-  card.append(match, button(t("match.finish"), "finish-btn", () => {
+  card.append(match, button(`✓ ${t("match.finish")}`, "finish-btn", () => {
     item.finished = true;
     persist();
     render();

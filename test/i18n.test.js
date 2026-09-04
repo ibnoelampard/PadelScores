@@ -42,3 +42,10 @@ test("provides a court close confirmation message", () => {
   i18n.setLanguage("en");
   assert.match(i18n.t("courtRemove.confirm", { name: "Court 2" }), /Close Court 2/);
 });
+
+test("keeps match action labels free of presentation icons", () => {
+  const i18n = createI18n({ storage: { getItem: () => null, setItem() {} }, browserLanguage: "id-ID", root: { setAttribute() {} } });
+  assert.equal(i18n.t("match.finish"), "Selesai");
+  i18n.setLanguage("en");
+  assert.equal(i18n.t("match.finish"), "Finish");
+});

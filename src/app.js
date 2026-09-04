@@ -430,7 +430,8 @@ function scheduleCard(item, expanded, canStart) {
     scores.append(input);
   });
   match.append(scores, el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
-  card.append(match, button(`✓ ${t("match.finish")}`, "finish-btn", () => {
+  const finishLabel = `✓ ${t("match.finish").replace(/^✓\s*/, "")}`;
+  card.append(match, button(finishLabel, "finish-btn", () => {
     item.finished = true;
     persist();
     render();

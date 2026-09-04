@@ -251,11 +251,14 @@ function renderSession() {
   const activeItem = items.find(item => item.started && !item.finished);
   const nextItem = items.find(item => !item.finished && !item.started);
   if (!expandedScheduleId || !items.some(item => item.id === expandedScheduleId)) expandedScheduleId = activeItem?.id || nextItem?.id;
+  const courtHeadingCopy = el("div", { class: "court-heading-copy" }, [
+    el("h2", { text: courtName(court) }),
+    el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) })
+  ]);
   const courtHeadingActions = el("div", { class: "court-heading-actions" }, [
-    el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) }),
     button(`× ${t("courtRemove.action")}`, "close-court-btn", () => closeCourtFromPage(court), { "aria-label": t("courtRemove.action") })
   ]);
-  list.append(el("div", { class: "section-head" }, [el("h2", { text: courtName(court) }), courtHeadingActions]));
+  list.append(el("div", { class: "section-head" }, [courtHeadingCopy, courtHeadingActions]));
   items.forEach(item => list.append(scheduleCard(item, item.id === expandedScheduleId, !activeItem && item.id === nextItem?.id)));
   const bye = items[0]?.bye || [];
   if (bye.length) list.append(el("div", { class: "bye", text: t("schedule.bye", { names: bye.map(id => state.players.find(player => player.id === id)?.name).join(" · ") }) }));

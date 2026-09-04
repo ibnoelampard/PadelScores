@@ -35,3 +35,10 @@ test("translates session expansion actions and modal copy", () => {
   assert.equal(i18n.t("session.extendDuration"), "Extend duration");
   assert.match(i18n.t("durationAdd.success", { count: 6 }), /6/);
 });
+
+test("provides a court close confirmation message", () => {
+  const i18n = createI18n({ storage: { getItem: () => null, setItem() {} }, browserLanguage: "id-ID", root: { setAttribute() {} } });
+  assert.match(i18n.t("courtRemove.confirm", { name: "Court 1" }), /Court 1/);
+  i18n.setLanguage("en");
+  assert.match(i18n.t("courtRemove.confirm", { name: "Court 2" }), /Close Court 2/);
+});

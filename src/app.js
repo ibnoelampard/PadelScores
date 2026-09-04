@@ -53,6 +53,22 @@ function addCourtToSession() {
   }
 }
 
+function closeCourtFromPage(court) {
+  if (!window.confirm(t("courtRemove.confirm", { name: courtName(court) }))) return;
+  try {
+    const result = removeCourtAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, courtId: court.id });
+    state.courts = result.courts;
+    state.session.courtCount = state.courts.filter(item => !item.removed).length;
+    activeCourtId = state.courts.find(item => !item.removed)?.id || "";
+    sessionNotice = t("courtRemove.success");
+    persist();
+    render();
+  } catch {
+    sessionNotice = t("courtRemove.error");
+    render();
+  }
+}
+
 function shell(title, subtitle, { sessionActions = false } = {}) {
   const root = el("div", { class: "app-shell" });
   const nextLanguage = i18n.getLanguage() === "id" ? "en" : "id";
@@ -80,7 +96,6 @@ function sessionActionsMenu() {
     button(t("session.addPlayer"), "menu-btn", () => { sessionModal = "add-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     button(t("session.removePlayer"), "menu-btn", () => { sessionModal = "remove-player"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     button(t("session.addCourt"), "menu-btn", () => { sessionMenuOpen = false; addCourtToSession(); }, { role: "menuitem" }),
-    button(t("session.removeCourt"), "menu-btn", () => { sessionModal = "remove-court"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     button(t("session.extendDuration"), "menu-btn", () => { sessionModal = "extend-duration"; sessionMenuOpen = false; render(); }, { role: "menuitem" }),
     el("div", { class: "menu-language" }, [el("span", { class: "menu-label", text: t("session.language") }), button("ID", `language-option ${i18n.getLanguage() === "id" ? "active" : ""}`, () => { i18n.setLanguage("id"); sessionMenuOpen = false; render(); }), button("EN", `language-option ${i18n.getLanguage() === "en" ? "active" : ""}`, () => { i18n.setLanguage("en"); sessionMenuOpen = false; render(); })])
   );
@@ -236,7 +251,11 @@ function renderSession() {
   const activeItem = items.find(item => item.started && !item.finished);
   const nextItem = items.find(item => !item.finished && !item.started);
   if (!expandedScheduleId || !items.some(item => item.id === expandedScheduleId)) expandedScheduleId = activeItem?.id || nextItem?.id;
-  list.append(el("div", { class: "section-head" }, [el("h2", { text: courtName(court) }), el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) })]));
+  const courtHeadingActions = el("div", { class: "court-heading-actions" }, [
+    el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) }),
+    button(t("courtRemove.action"), "close-court-btn", () => closeCourtFromPage(court), { "aria-label": t("courtRemove.action") })
+  ]);
+  list.append(el("div", { class: "section-head" }, [el("h2", { text: courtName(court) }), courtHeadingActions]));
   items.forEach(item => list.append(scheduleCard(item, item.id === expandedScheduleId, !activeItem && item.id === nextItem?.id)));
   const bye = items[0]?.bye || [];
   if (bye.length) list.append(el("div", { class: "bye", text: t("schedule.bye", { names: bye.map(id => state.players.find(player => player.id === id)?.name).join(" · ") }) }));

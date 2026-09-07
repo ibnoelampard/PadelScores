@@ -10,6 +10,7 @@ let activeCourtId = state.courts[0]?.id || "";
 let expandedScheduleId = null;
 let activeSessionTab = "schedule";
 let replacementMatchId = null;
+let replacementOutPlayerId = null;
 let sessionNotice = "";
 let sessionMenuOpen = false;
 let sessionModal = null;
@@ -241,6 +242,7 @@ function renderSession() {
     activeCourtId = court.id;
     expandedScheduleId = null;
     replacementMatchId = null;
+    replacementOutPlayerId = null;
     render();
   })));
   root.append(tabs);
@@ -347,6 +349,8 @@ function sessionTabs() {
   [["schedule", "session.schedule", "🗓"], ["leaderboard", "session.leaderboard", "🏆"]].forEach(([tab, label, icon]) => {
     const tabButton = button("", `session-tab ${activeSessionTab === tab ? "active" : ""}`, () => {
       activeSessionTab = tab;
+      replacementMatchId = null;
+      replacementOutPlayerId = null;
       render();
     }, { "aria-current": activeSessionTab === tab ? "page" : "false" });
     tabButton.append(el("span", { class: "session-tab-icon", "aria-hidden": "true", text: icon }), el("span", { text: t(label) }));
@@ -385,13 +389,27 @@ function scheduleCard(item, expanded, canStart) {
   const names = id => state.players.find(player => player.id === id)?.name || "-";
   const active = item.started && !item.finished;
   const historicalMatch = state.courts.some(court => court.id === item.courtId && court.removed) || [...item.teamA, ...item.teamB].some(id => state.players.find(player => player.id === id)?.removed);
-  const card = el("article", { class: `schedule-item ${item.finished ? "done" : active ? "live" : ""} ${expanded && active ? "expanded" : "collapsed"}` });
+  const editing = replacementMatchId === item.id && !item.started && !item.finished && !historicalMatch;
+  const card = el("article", { class: `schedule-item ${editing ? "editing-players" : ""} ${item.finished ? "done" : active ? "live" : ""} ${expanded && active ? "expanded" : "collapsed"}` });
   const status = active ? t("status.playing") : "";
   if (status) card.append(el("div", { class: "slot-head status-row" }, [el("span", { class: "live-text", text: status })]));
   const match = el("div", { class: "match" });
-  match.append(el("div", { class: "team", text: `${names(item.teamA[0])}\n${names(item.teamA[1])}` }));
+  const teamView = (ids, right = false) => {
+    const team = el("div", { class: `team player-team ${right ? "right" : ""}` });
+    ids.forEach(id => {
+      if (!editing) return team.append(el("span", { class: "player-name", text: names(id) }));
+      const player = button("", "player-replace-btn", () => {
+        replacementOutPlayerId = id;
+        render();
+      }, { "aria-label": t("replace.title", { name: names(id) }), "data-replace-player": id });
+      player.append(el("span", { text: names(id) }), el("span", { text: "⇄", "aria-hidden": "true" }));
+      team.append(player);
+    });
+    return team;
+  };
+  match.append(teamView(item.teamA));
   if (!active) {
-    match.append(el("div", { class: "collapsed-score", text: item.scoreA || item.scoreB ? `${item.scoreA || 0} — ${item.scoreB || 0}` : "—" }), el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
+    match.append(el("div", { class: "collapsed-score", text: item.scoreA || item.scoreB ? `${item.scoreA || 0} — ${item.scoreB || 0}` : "—" }), teamView(item.teamB, true));
     card.append(match);
     if (item.finished && !historicalMatch) card.append(button(`✎ ${t("match.edit")}`, "more-btn", () => {
       item.finished = false;
@@ -400,22 +418,32 @@ function scheduleCard(item, expanded, canStart) {
       persist();
       render();
     }));
-    else {
+    else if (!item.started && !item.finished && !historicalMatch) {
       const actions = el("div", { class: "match-actions" });
-      if (canStart) actions.append(button(`▶ ${t("match.start")}`, "more-btn start-btn", () => {
+      if (canStart && !editing) actions.append(button(`▶ ${t("match.start")}`, "more-btn start-btn", () => {
         item.started = true;
         replacementMatchId = null;
         expandedScheduleId = item.id;
         persist();
         render();
       }));
-      actions.append(button(`⇄ ${t("match.replace")}`, "more-btn", () => {
-        replacementMatchId = replacementMatchId === item.id ? null : item.id;
+      if (editing) {
+        actions.append(el("span", { class: "replace-hint", text: t("replace.hint") }), button(t("common.cancel"), "more-btn replace-cancel", () => {
+          replacementMatchId = null;
+          replacementOutPlayerId = null;
+          render();
+          document.getElementById(`replace-${item.id}`)?.focus();
+        }));
+      } else actions.append(button(`✎ ${t("match.replace")}`, "more-btn", () => {
+        replacementMatchId = item.id;
+        replacementOutPlayerId = null;
         expandedScheduleId = item.id;
+        sessionNotice = "";
         render();
-      }));
+        document.querySelector(".player-replace-btn")?.focus();
+      }, { id: `replace-${item.id}` }));
       card.append(actions);
-      if (replacementMatchId === item.id) card.append(replacementPanel(item));
+      if (editing && replacementOutPlayerId) card.append(replacementPanel(item));
     }
     return card;
   }
@@ -429,7 +457,7 @@ function scheduleCard(item, expanded, canStart) {
     });
     scores.append(input);
   });
-  match.append(scores, el("div", { class: "team right", text: `${names(item.teamB[0])}\n${names(item.teamB[1])}` }));
+  match.append(scores, teamView(item.teamB, true));
   const finishLabel = `✓ ${t("match.finish").replace(/^✓\s*/, "")}`;
   card.append(match, button(finishLabel, "finish-btn", () => {
     item.finished = true;
@@ -440,39 +468,64 @@ function scheduleCard(item, expanded, canStart) {
 }
 
 function replacementPanel(item) {
-  const participants = [...item.teamA, ...item.teamB];
+  const outPlayerId = replacementOutPlayerId;
+  const outName = state.players.find(player => player.id === outPlayerId)?.name || "-";
   const candidates = availableReplacementPlayers({ players: state.players, schedule: state.schedule, targetMatchId: item.id });
-  const panel = el("div", { class: "replacement-panel" });
-  panel.append(el("p", { class: "subtle", text: t("replace.notice") }));
-  if (!candidates.length) {
-    panel.append(el("div", { class: "error", role: "alert", text: t("replace.none") }), button(t("common.cancel"), "secondary-btn wide", () => { replacementMatchId = null; render(); }));
-    return panel;
-  }
-  const outSelect = el("select", { class: "input", "aria-label": t("replace.out") });
-  participants.forEach(id => outSelect.append(el("option", { value: id, text: state.players.find(player => player.id === id)?.name || "-" })));
-  const inSelect = el("select", { class: "input", "aria-label": t("replace.in") });
-  candidates.forEach(player => inSelect.append(el("option", { value: player.id, text: player.name })));
-  const error = el("div", { class: "error", role: "alert" });
-  error.hidden = true;
+  const panel = el("dialog", { class: "replacement-sheet", "aria-labelledby": "replacement-title", "aria-describedby": "replacement-description" });
+  const close = () => {
+    panel.close();
+    replacementOutPlayerId = null;
+    render();
+    [...document.querySelectorAll("[data-replace-player]")].find(node => node.dataset.replacePlayer === outPlayerId)?.focus();
+  };
+  panel.addEventListener("cancel", event => { event.preventDefault(); close(); });
   panel.append(
-    el("label", { text: t("replace.out") }), outSelect,
-    el("label", { text: t("replace.in") }), inSelect,
-    error,
-    el("div", { class: "replacement-actions" }, [
-      button(t("common.cancel"), "secondary-btn", () => { replacementMatchId = null; render(); }),
-      button(t("replace.save"), "primary-btn", () => {
-        try {
-          state.schedule = replaceAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, targetMatchId: item.id, outPlayerId: outSelect.value, inPlayerId: inSelect.value }).schedule;
-          replacementMatchId = null;
-          sessionNotice = t("replace.success");
-          persist();
-          render();
-        } catch {
-          showError(error, t("replace.error"));
-        }
-      })
-    ])
+    el("div", { class: "sheet-handle", "aria-hidden": "true" }),
+    el("div", { class: "modal-head" }, [el("h2", { id: "replacement-title", text: t("replace.title", { name: outName }) }), button("×", "modal-close", close, { "aria-label": t("common.cancel") })]),
+    el("p", { class: "subtle", id: "replacement-description", text: t("replace.choose") })
   );
+  if (!candidates.length) {
+    panel.append(el("p", { class: "replacement-empty", role: "status", text: t("replace.none") }), button(t("common.cancel"), "secondary-btn wide", close));
+  } else {
+    let selectedPlayer = null;
+    const options = el("div", { class: "replacement-options", role: "group", "aria-label": t("replace.in") });
+    const summary = el("div", { class: "replacement-summary", "aria-live": "polite", text: t("replace.unselected") });
+    const error = el("div", { class: "error", role: "alert" });
+    error.hidden = true;
+    const save = button(t("replace.save"), "primary-btn", () => {
+      if (!selectedPlayer) return;
+      try {
+        state.schedule = replaceAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, targetMatchId: item.id, outPlayerId, inPlayerId: selectedPlayer.id }).schedule;
+        replacementMatchId = null;
+        replacementOutPlayerId = null;
+        sessionNotice = t("replace.success");
+        persist();
+        panel.close();
+        render();
+        document.getElementById(`replace-${item.id}`)?.focus();
+      } catch {
+        showError(error, t("replace.error"));
+      }
+    });
+    save.disabled = true;
+    candidates.forEach(player => {
+      const option = button("", "replacement-option", () => {
+        selectedPlayer = player;
+        [...options.children].forEach(node => {
+          const selected = node === option;
+          node.setAttribute("aria-pressed", String(selected));
+          node.lastElementChild.textContent = selected ? "✓" : "";
+        });
+        summary.textContent = `${outName} → ${player.name}`;
+        save.disabled = false;
+        error.hidden = true;
+      }, { "aria-pressed": "false" });
+      option.append(el("span", { class: "replacement-avatar", "aria-hidden": "true", text: Array.from(player.name.trim()).slice(0, 2).join("").toUpperCase() }), el("span", { class: "replacement-name", text: player.name }), el("span", { class: "replacement-check", "aria-hidden": "true" }));
+      options.append(option);
+    });
+    panel.append(options, el("div", { class: "replacement-impact" }, [summary, el("p", { class: "subtle", text: t("replace.notice") })]), error, el("div", { class: "replacement-actions" }, [button(t("common.cancel"), "secondary-btn", close), save]));
+  }
+  setTimeout(() => { if (panel.isConnected) panel.showModal(); }, 0);
   return panel;
 }
 

@@ -7,7 +7,6 @@ const app = document.querySelector("#app");
 const i18n = createI18n();
 let state = loadState();
 let activeCourtId = state.courts[0]?.id || "";
-let expandedScheduleId = null;
 let activeSessionTab = "schedule";
 let replacementMatchId = null;
 let replacementOutPlayerId = null;
@@ -240,7 +239,6 @@ function renderSession() {
   if (!availableCourts.some(court => court.id === activeCourtId)) activeCourtId = availableCourts[0]?.id || "";
   availableCourts.forEach(court => tabs.append(button(courtName(court), `court-tab ${court.id === activeCourtId ? "active" : ""}`, () => {
     activeCourtId = court.id;
-    expandedScheduleId = null;
     replacementMatchId = null;
     replacementOutPlayerId = null;
     render();
@@ -252,7 +250,6 @@ function renderSession() {
   const items = state.schedule.filter(item => item.courtId === court.id);
   const activeItem = items.find(item => item.started && !item.finished);
   const nextItem = items.find(item => !item.finished && !item.started);
-  if (!expandedScheduleId || !items.some(item => item.id === expandedScheduleId)) expandedScheduleId = activeItem?.id || nextItem?.id;
   const courtHeadingCopy = el("div", { class: "court-heading-copy" }, [
     el("h2", { text: courtName(court) }),
     el("span", { class: "subtle", text: t("schedule.matches", { count: items.length }) })
@@ -261,7 +258,7 @@ function renderSession() {
     button(`× ${t("courtRemove.action")}`, "close-court-btn", () => closeCourtFromPage(court), { "aria-label": t("courtRemove.action") })
   ]);
   list.append(el("div", { class: "section-head" }, [courtHeadingCopy, courtHeadingActions]));
-  items.forEach(item => list.append(scheduleCard(item, item.id === expandedScheduleId, !activeItem && item.id === nextItem?.id)));
+  items.forEach(item => list.append(scheduleCard(item, !activeItem && item.id === nextItem?.id)));
   const bye = items[0]?.bye || [];
   if (bye.length) list.append(el("div", { class: "bye", text: t("schedule.bye", { names: bye.map(id => state.players.find(player => player.id === id)?.name).join(" · ") }) }));
   root.append(list);
@@ -385,12 +382,12 @@ function renderLeaderboard(root) {
   root.append(section);
 }
 
-function scheduleCard(item, expanded, canStart) {
+function scheduleCard(item, canStart) {
   const names = id => state.players.find(player => player.id === id)?.name || "-";
   const active = item.started && !item.finished;
   const historicalMatch = state.courts.some(court => court.id === item.courtId && court.removed) || [...item.teamA, ...item.teamB].some(id => state.players.find(player => player.id === id)?.removed);
   const editing = replacementMatchId === item.id && !item.started && !item.finished && !historicalMatch;
-  const card = el("article", { class: `schedule-item ${editing ? "editing-players" : ""} ${item.finished ? "done" : active ? "live" : ""} ${expanded && active ? "expanded" : "collapsed"}` });
+  const card = el("article", { class: `schedule-item ${editing ? "editing-players" : ""} ${item.finished ? "done" : active ? "live" : ""} ${active ? "expanded" : "collapsed"}` });
   const status = active ? t("status.playing") : "";
   if (status) card.append(el("div", { class: "slot-head status-row" }, [el("span", { class: "live-text", text: status })]));
   const match = el("div", { class: "match" });
@@ -414,7 +411,6 @@ function scheduleCard(item, expanded, canStart) {
     if (item.finished && !historicalMatch) card.append(button(`✎ ${t("match.edit")}`, "more-btn", () => {
       item.finished = false;
       item.started = true;
-      expandedScheduleId = item.id;
       persist();
       render();
     }));
@@ -423,7 +419,6 @@ function scheduleCard(item, expanded, canStart) {
       if (canStart && !editing) actions.append(button(`▶ ${t("match.start")}`, "more-btn start-btn", () => {
         item.started = true;
         replacementMatchId = null;
-        expandedScheduleId = item.id;
         persist();
         render();
       }));
@@ -437,7 +432,6 @@ function scheduleCard(item, expanded, canStart) {
       } else actions.append(button(`✎ ${t("match.replace")}`, "more-btn", () => {
         replacementMatchId = item.id;
         replacementOutPlayerId = null;
-        expandedScheduleId = item.id;
         sessionNotice = "";
         render();
         document.querySelector(".player-replace-btn")?.focus();

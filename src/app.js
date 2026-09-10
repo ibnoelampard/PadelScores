@@ -1,11 +1,16 @@
 import { createI18n } from "./i18n.js";
-import { loadState, saveState, createEmptyState } from "./storage.js";
+import { createEmptyState } from "./storage.js";
+import { CloudSession } from "./cloud.js";
+import { createCloudUI } from "./cloud-ui.js";
+import { supabase, repository, signIn, watchSession } from "./supabase.js";
 import { addCourtAndRemixSchedule, addPlayerAndRemixSchedule, appendScheduleSlots, availableReplacementPlayers, generateSchedule, removeCourtAndRemixSchedule, removePlayerAndRemixSchedule, replaceAndRemixSchedule } from "./mixer.js";
 import { calculateLeaderboard } from "./leaderboard.js";
 
 const app = document.querySelector("#app");
 const i18n = createI18n();
-let state = loadState();
+let state = createEmptyState();
+let cloud;
+let cloudUI;
 let activeCourtId = state.courts[0]?.id || "";
 let activeSessionTab = "schedule";
 let replacementMatchId = null;
@@ -14,7 +19,7 @@ let sessionNotice = "";
 let sessionMenuOpen = false;
 let sessionModal = null;
 
-const persist = () => saveState(state);
+const persist = () => cloud.edit(state);
 const t = (key, variables) => i18n.t(key, variables);
 const el = (tag, attrs = {}, children = []) => {
   const node = document.createElement(tag);
@@ -34,6 +39,7 @@ const button = (text, className, handler, attrs = {}) => {
 const courtName = court => t("court.label", { number: court.id.replace(/^c/, "") });
 
 function addCourtToSession() {
+  if(state.courts.length>=50 || state.schedule.length+Math.ceil(state.session.durationHours*6)>5000){alert(cloudUI.t('limits'));return;}
   const used = new Set(state.courts.map(court => court.id));
   let nextNumber = state.courts.reduce((max, court) => Math.max(max, Number(court.id.match(/^c(\d+)$/)?.[1] || 0)), 0) + 1;
   while (used.has(`c${nextNumber}`)) nextNumber += 1;
@@ -83,6 +89,7 @@ function shell(title, subtitle, { sessionActions = false } = {}) {
   ]);
   const headerActions = sessionActions ? sessionActionsMenu() : languageButton;
   root.append(el("header", { class: "topbar" }, [heading, headerActions]));
+  if (cloud?.user && cloud.status !== "loading") root.append(cloudUI.toolbar());
   return root;
 }
 
@@ -110,10 +117,17 @@ function showError(node, message) {
 
 function render() {
   app.replaceChildren();
+  if (!cloud || cloud.status === "loading" || !cloud.user) {
+    const root = shell(t("empty.title"), t("empty.subtitle"));
+    if (cloudUI) root.append(cloudUI.loginView());
+    app.append(root);
+    return;
+  }
   if (state.session.status === "empty") renderEmpty();
   else if (state.session.status === "setup") renderSetup();
   else if (state.session.status === "players") renderPlayers();
   else renderSession();
+  cloudUI.update();
 }
 
 function renderEmpty() {
@@ -156,6 +170,14 @@ function renderSetup() {
     const wrap = el("div", { class: "field" });
     wrap.append(el("label", { for: key, text: t(labelKey) }));
     const input = el("input", { class: "input", id: key, type: "number", min, step: key === "durationHours" ? "0.1" : "1", placeholder: t(placeholderKey) });
+    input.max = key === 'playerCount' ? '200' : key === 'courtCount' ? '50' : '1000';
+    if (state.session[key] > 0) input.value = state.session[key];
+    input.addEventListener('input',()=>{
+      const value=Number(input.value);
+      if(Number.isFinite(value) && value>=0 && value<=Number(input.max) && (key==='durationHours'||Number.isInteger(value))) {
+        state.session[key]=value;persist();
+      }
+    });
     fields[key] = input;
     wrap.append(input);
     if (key === "durationHours") wrap.append(el("div", { class: "subtle", text: t("setup.rotation") }));
@@ -167,7 +189,8 @@ function renderSetup() {
       const players = Number(fields.playerCount.value);
       const courts = Number(fields.courtCount.value);
       const duration = Number(fields.durationHours.value);
-      if (!Number.isInteger(players) || players < 4 || !Number.isInteger(courts) || courts < 1 || duration <= 0) return showError(error, t("validation.setup"));
+      if (!Number.isInteger(players) || players < 4 || players>200 || !Number.isInteger(courts) || courts < 1 || courts>50 || !Number.isFinite(duration) || duration <= 0 || duration>1000) return showError(error, t("validation.setup"));
+      if(Math.floor(duration*6)*Math.min(courts,Math.floor(players/4))>5000)return showError(error,cloudUI.t('limits'));
       state.session = { status: "players", playerCount: players, courtCount: courts, durationHours: duration, slotMinutes: 10 };
       state.players = Array.from({ length: players }, (_, index) => ({ id: `p${index + 1}`, name: "", matches: 0, wins: 0, byes: 0 }));
       state.courts = Array.from({ length: courts }, (_, index) => ({ id: `c${index + 1}`, name: `Court ${index + 1}` }));
@@ -191,8 +214,8 @@ function renderPlayers() {
   state.players.forEach((player, index) => {
     const row = el("div", { class: "name-row" });
     row.append(el("span", { class: "name-number", text: String(index + 1).padStart(2, "0") }));
-    const input = el("input", { class: "input", type: "text", placeholder: t("players.placeholder", { number: index + 1 }), value: player.name, autocomplete: "off" });
-    input.addEventListener("input", () => { player.name = input.value; });
+    const input = el("input", { class: "input", type: "text", placeholder: t("players.placeholder", { number: index + 1 }), value: player.name, autocomplete: "off", maxlength: 200 });
+    input.addEventListener("input", () => { player.name = input.value; persist(); });
     inputs.push(input);
     row.append(input);
     list.append(row);
@@ -263,7 +286,7 @@ function renderSession() {
   if (bye.length) list.append(el("div", { class: "bye", text: t("schedule.bye", { names: bye.map(id => state.players.find(player => player.id === id)?.name).join(" · ") }) }));
   root.append(list);
   const actions = el("div", { class: "footer-actions" });
-  actions.append(el("span", { class: "subtle", text: t("schedule.saved") }), button(t("schedule.reset"), "danger", () => {
+  actions.append(el("span", { class: "subtle", text: cloudUI.t("saveHint") }), button(t("schedule.reset"), "danger", () => {
     if (window.confirm(t("schedule.resetConfirm"))) {
       state = createEmptyState();
       persist();
@@ -293,6 +316,7 @@ function sessionModalView() {
   const input = isRemoval ? el("select", { class: "input", id: isRemovePlayer ? "remove-player" : "remove-court" }) : el("input", { class: "input", type: isPlayer ? "text" : "number", id: isPlayer ? "new-player-name" : "extra-duration", inputmode: isPlayer ? "text" : "decimal", autocomplete: "off" });
   if (isRemovePlayer) state.players.filter(player => !player.removed).forEach(player => input.append(el("option", { value: player.id, text: player.name })));
   if (isRemoveCourt) state.courts.filter(court => !court.removed).forEach(court => input.append(el("option", { value: court.id, text: courtName(court) })));
+  if(isPlayer)input.maxLength=200;
   if (!isPlayer) { input.min = "0.1"; input.step = "0.1"; }
   panel.append(
     el("div", { class: "modal-head" }, [el("h2", { text: t(isRemovePlayer ? "playerRemove.title" : isRemoveCourt ? "courtRemove.title" : isPlayer ? "playerAdd.title" : "durationAdd.title") }), button("×", "modal-close", closeSessionModal, { "aria-label": t("common.cancel") })]),
@@ -306,7 +330,9 @@ function sessionModalView() {
       } else if (isRemoveCourt) {
         try { const result = removeCourtAndRemixSchedule({ players: state.players, courts: state.courts, schedule: state.schedule, courtId: input.value }); state.courts = result.courts; state.session.courtCount = state.courts.filter(court => !court.removed).length; activeCourtId = state.courts.find(court => !court.removed)?.id || ""; sessionNotice = t("courtRemove.success"); sessionModal = null; } catch { return showError(error, t("courtRemove.error")); }
       } else if (isPlayer) {
+        if(state.players.length>=200)return showError(error,cloudUI.t('limits'));
         const name = input.value.trim();
+        if(name.length>200)return showError(error,cloudUI.t('limits'));
         if (!name) return showError(error, t("validation.playerRequired"));
         if (state.players.some(player => player.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) return showError(error, t("validation.playerDuplicate"));
         const used = new Set(state.players.map(player => player.id));
@@ -321,6 +347,7 @@ function sessionModalView() {
         sessionNotice = state.schedule.some(match => !match.started && !match.finished) ? t("playerAdd.success", { name }) : t("playerAdd.noPending", { name });
       } else {
         const hours = Number(input.value);
+        if(hours+state.session.durationHours>1000 || state.schedule.length+Math.floor(hours*6)*state.courts.filter(c=>!c.removed).length>5000)return showError(error,cloudUI.t('limits'));
         if (!Number.isFinite(hours) || hours <= 0) return showError(error, t("validation.durationInvalid"));
         try {
           const result = appendScheduleSlots({ players: state.players, courts: state.courts, schedule: state.schedule, additionalHours: hours });
@@ -444,9 +471,13 @@ function scheduleCard(item, canStart) {
   const scores = el("div", { class: "scores" });
   scores.append(el("div", { class: "score-label", text: t("score.label") }));
   ["scoreA", "scoreB"].forEach(key => {
-    const input = el("input", { type: "number", min: 0, inputmode: "numeric", value: item[key], "aria-label": t(key === "scoreA" ? "score.left" : "score.right") });
+    const input = el("input", { type: "number", min: 0, max: 999999, step: 1, inputmode: "numeric", value: item[key], "aria-label": t(key === "scoreA" ? "score.left" : "score.right") });
     input.addEventListener("input", () => {
-      item[key] = input.value;
+      if (input.value !== "" && (!Number.isSafeInteger(Number(input.value)) || Number(input.value) < 0 || Number(input.value)>999999)) {
+        input.setCustomValidity(cloudUI.t("invalidScore")); input.reportValidity(); return;
+      }
+      input.setCustomValidity("");
+      item[key] = input.value === "" ? "" : String(Number(input.value));
       persist();
     });
     scores.append(input);
@@ -523,4 +554,35 @@ function replacementPanel(item) {
   return panel;
 }
 
+cloud = new CloudSession({repository,storage:globalThis.localStorage,onChange:(snapshot,reason)=>{
+  state=snapshot.state;
+  if(reason==='data') {
+    activeCourtId=state.courts.find(court=>!court.removed)?.id||"";
+    replacementMatchId=null;replacementOutPlayerId=null;sessionModal=null;sessionMenuOpen=false;sessionNotice="";
+    render();
+  } else cloudUI?.update();
+}});
+cloudUI=createCloudUI({cloud,i18n,signIn,signOut:async()=>{
+  const {error}=await supabase.auth.signOut({scope:'local'});
+  if(error)alert(cloudUI.t('signinError'));
+},onImport:value=>{
+  state=value;persist();render();void cloud.flush();
+}});
+cloud.status='loading';
 render();
+let authInitialized=false;
+let unwatch=()=>{};
+supabase.auth.onAuthStateChange((_event,session)=>{
+  const user=session?.user||null;
+  // Defer Supabase calls until its auth lock has been released.
+  setTimeout(async()=>{
+    if(authInitialized && cloud.user?.id===user?.id)return;
+    authInitialized=true;unwatch();
+    await cloud.connect(user);
+    if(user && cloud.user?.id===user.id)unwatch=watchSession(user.id,()=>void cloud.refresh(),status=>cloudUI.setConnection(status==='SUBSCRIBED'));
+  },0);
+});
+window.addEventListener('beforeunload',event=>{if(cloud.dirty){event.preventDefault();event.returnValue='';}});
+window.addEventListener('online',()=>void cloud.refresh());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void cloud.refresh();});
+setInterval(()=>{if(document.visibilityState==='visible')void cloud.refresh();},30000);
